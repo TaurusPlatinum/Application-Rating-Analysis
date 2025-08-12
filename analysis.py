@@ -1,69 +1,60 @@
 import pandas as pd
 
-df = pd.read_csv("survey_results_public.csv")
-schema_df = pd.read_csv("survey_results_schema.csv")
-schema_questions = set(schema_df["qname"].dropna())
-questions_in_df = set(df.columns)
-common_questions = schema_questions.intersection(questions_in_df)
+applications = pd.read_csv("applications.csv", low_memory=False)
+industries = pd.read_csv("industries.csv", low_memory=False)
+applications = applications.drop_duplicates(subset=['applicant_id'], keep='first').reset_index(drop=True)
+applications['External Rating'] = pd.to_numeric(applications['External Rating'], errors='coerce').fillna(0)
+applications['Education level'] = applications['Education level'].fillna("Secondary")
+applications['Applied at'] = pd.to_datetime(applications['Applied at'], errors='coerce')
+applications['Age'] = pd.to_numeric(applications['Age'], errors='coerce')
+applications['Amount'] = pd.to_numeric(applications['Amount'], errors='coerce')
+applications['is_married'] = applications['Marital status'].str.lower().str.contains('married')
+applications['is_kyiv'] = applications['Location'].str.lower().str.contains('київ|kiev|kyiv')
+industries['Industry'] = industries['Industry'].str.strip()
+applications['Industry'] = applications['Industry'].str.strip()
+applications = applications.merge(industries, on='Industry', how='left')
+applications['weekday'] = applications['Applied at'].dt.weekday 
+applications['is_weekday'] = applications['weekday'] < 5
 
-# Identify common questions between schema and data
-total_respondents = len(df)
+age_score = ((applications['Age'] >= 35) & (applications['Age'] <= 55)).astype(int) * 20
+weekday_score = applications['is_weekday'].fillna(False).astype(int) * 20
+married_score = applications['is_married'].fillna(False).astype(int) * 20
+kyiv_score = apps['is_kyiv'].fillna(False).astype(int) * 10
+industry_score = applications['Score'].fillna(0).clip(0, 20)
 
-# Number of respondents who answered all questions
-df_complete = df.dropna(subset=common_questions)
-complete_respondents = len(df_complete)
+external_rating = applications['External Rating']
+external_high_score = (external_rating >= 7).astype(int) * 20
+external_low_score = (external_rating <= 2).astype(int) * (-20)
 
-# Central tendency measures for professional coding experience (YearsCodePro)
-df["YearsCodePro_num"] = pd.to_numeric(df["YearsCodePro"], errors='coerce')
-mean_exp = df["YearsCodePro_num"].mean()
-median_exp = df["YearsCodePro_num"].median()
-mode_exp = df["YearsCodePro_num"].mode()
+applications['raw_rating'] = (
+    age_score +
+    weekday_score +
+    married_score +
+    kyiv_score +
+    industry_score +
+    external_high_score +
+    external_low_score
+)
 
-# Number of respondents working remotely
-remote_workers = df["RemoteWork"].value_counts().get("Remote", 0)
+applications.loc[applications['Amount'].isna() | (external_rating == 0), 'raw_rating'] = 0
+applications['rating'] = applications['raw_rating'].clip(lower=0, upper=100).astype(int)
+accepted = applications[applications['rating'] > 0].copy()
 
-# Percentage of respondents who code in Python
-python_coders = df['LanguageHaveWorkedWith'].str.contains('Python', na=False).sum()
-total_language_respondents = df['LanguageHaveWorkedWith'].dropna().shape[0]
-percent_python = (python_coders / total_language_respondents) * 100 if total_language_respondents > 0 else 0
 
-# Number of respondents who learned coding online (if column exists)
-if 'LearnCodeOnline' in df.columns:
-    learn_online_respondents = df['LearnCodeOnline'].dropna().str.contains("Online", case=False).sum()
-else:
-    learn_online_respondents = None
+weekly_avg = (
+    accepted
+    .set_index('Applied at')
+    .resample('W-MON')['rating']
+    .mean()
+    .reset_index()
+    .rename(columns={'Applied at': 'week_starting_monday', 'rating': 'avg_rating'})
+)
+weekly_avg['avg_rating'] = weekly_avg['avg_rating'].fillna(0)
 
-# Average and median compensation by country among Python programmers
-df_python = df[df['LanguageHaveWorkedWith'].str.contains('Python', na=False)].copy()
-df_python['ConvertedCompYearly_num'] = pd.to_numeric(df_python['ConvertedCompYearly'], errors='coerce')
-comp_by_country = df_python.groupby('Country')['ConvertedCompYearly_num'].agg(['mean', 'median']).sort_values('mean', ascending=False)
+print("Number of accepted applications:", len(accepted))
+print("\nAverage rating by week:")
+print(weekly_avg)
 
-# Education levels of top 5 highest compensated respondents
-df["ConvertedCompYearly_num"] = pd.to_numeric(df["ConvertedCompYearly"], errors='coerce')
-top5 = df.sort_values("ConvertedCompYearly_num", ascending=False).head(5)
 
-# Percentage of Python programmers by age group
-def python_percentage(group):
-    total = group.shape[0]
-    python_count = group["LanguageHaveWorkedWith"].str.contains('Python', na=False).sum()
-    return (python_count / total) * 100 if total > 0 else 0
-percent_by_age = df.groupby("Age").apply(python_percentage)
-# Most common industries among high-paid remote workers (>= 75th percentile)
-percentile_75 = df["ConvertedCompYearly_num"].quantile(0.75)
-df_high_paid_remote = df[(df["ConvertedCompYearly_num"] >= percentile_75) & (df["RemoteWork"] == "Remote")]
-industry_counts = df_high_paid_remote["DevType"].dropna().str.split(";").explode().value_counts()
-
-print(f"1. Total respondents: {total_respondents}")
-print(f"2. Respondents who answered all questions: {complete_respondents}")
-print(f"3. Central tendency measures for professional coding experience (YearsCodePro):")
-print(f"   Mean experience: {mean_exp:.2f}")
-print(f"   Median experience: {median_exp}")
-print(f"   Mode experience: {list(mode_exp)}")
-print(f"4. Number of respondents working remotely: {remote_workers}")
-print(f"5. Percentage of respondents who code in Python: {percent_python:.2f}%")
-print(f"6. Number of respondents who learned coding online: {learn_online_respondents}")
-print(f"7. Average and median compensation by country among Python programmers:\n{comp_by_country}")
-print("8. Education levels of top 5 highest compensated respondents:")
-print(top5.loc[:, ["ConvertedCompYearly_num", "EdLevel"]].to_string(index=False))
-print(f"9. Percentage of Python programmers by age group:\n{percent_by_age}")
-print(f"10. Most common industries among high-paid remote workers:\n{industry_counts.head(10)}")
+accepted.to_csv("accepted_applications.csv", index=False)
+weekly_avg.to_csv("weekly_avg_rating.csv", index=False)
