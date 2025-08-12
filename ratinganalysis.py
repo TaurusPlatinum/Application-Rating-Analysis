@@ -9,7 +9,7 @@ applications['Applied at'] = pd.to_datetime(applications['Applied at'], errors='
 applications['Age'] = pd.to_numeric(applications['Age'], errors='coerce')
 applications['Amount'] = pd.to_numeric(applications['Amount'], errors='coerce')
 applications['is_married'] = applications['Marital status'].str.lower().str.contains('married')
-applications['is_kyiv'] = applications['Location'].str.lower().str.contains('київ|kiev|kyiv')
+applications['is_kyiv'] = applications['Location'].str.lower().str.contains('ГЄГЁВїГў|kiev|kyiv')
 industries['Industry'] = industries['Industry'].str.strip()
 applications['Industry'] = applications['Industry'].str.strip()
 applications = applications.merge(industries, on='Industry', how='left')
@@ -19,7 +19,7 @@ applications['is_weekday'] = applications['weekday'] < 5
 age_score = ((applications['Age'] >= 35) & (applications['Age'] <= 55)).astype(int) * 20
 weekday_score = applications['is_weekday'].fillna(False).astype(int) * 20
 married_score = applications['is_married'].fillna(False).astype(int) * 20
-kyiv_score = apps['is_kyiv'].fillna(False).astype(int) * 10
+kyiv_score = applications['is_kyiv'].fillna(False).astype(int) * 10
 industry_score = applications['Score'].fillna(0).clip(0, 20)
 
 external_rating = applications['External Rating']
